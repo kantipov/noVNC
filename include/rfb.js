@@ -45,7 +45,10 @@ var that           = {},  // Public API methods
     rfb_version    = 0,
     rfb_max_version= 3.8,
     rfb_auth_scheme= '',
-
+    
+    // Xvp
+    rfb_user	= '',
+    rfb_target	= '',
 
     // In preference order
     encodings      = [
@@ -709,7 +712,7 @@ init_msg = function() {
             types = ws.rQshiftBytes(num_types);
             Util.Debug("Server security types: " + types);
             for (i=0; i < types.length; i+=1) {
-                if ((types[i] > rfb_auth_scheme) && (types[i] < 3)) {
+                if ((types[i] > rfb_auth_scheme) && (types[i] < 23)) {
                     rfb_auth_scheme = types[i];
                 }
             }
@@ -718,6 +721,15 @@ init_msg = function() {
             }
             
             ws.send([rfb_auth_scheme]);
+            if (rfb_auth_scheme === 22) {
+                var bytes = [];
+                bytes.push(String.fromCharCode(rfb_user.length));
+                bytes.push(String.fromCharCode(rfb_target.length));
+                bytes.push(rfb_user);
+                bytes.push(rfb_target);
+                bytes = bytes.join('');
+	        ws.send_string(bytes);
+            }            
         } else {
             // Server decides
             if (ws.rQwait("security scheme", 4)) { return false; }
@@ -765,6 +777,18 @@ init_msg = function() {
                 ws.send(response);
                 updateState('SecurityResult');
                 return;
+            case 22: // XVP authentication
+                if (ws.rQwait("auth challenge", 16)) { return false; }
+                challenge = ws.rQshiftBytes(16);
+                var hexString = rfb_password;
+                rfb_password = [];
+                for (var i = 0; i < hexString.length; i += 2) {
+                    rfb_password.push(parseInt(hexString.substring(i, i + 2), 16));
+                }
+                response = (new DES(rfb_password)).encrypt(challenge);
+                ws.send(response);
+                updateState('SecurityResult');
+		return;
             default:
                 fail("Unsupported auth scheme: " + rfb_auth_scheme);
                 return;
@@ -1758,9 +1782,11 @@ clientCutText = function(text) {
 // Public API interface functions
 //
 
-that.connect = function(host, port, password, path) {
+that.connect = function(host, port, password, path, user, target) {
     //Util.Debug(">> connect");
 
+    rfb_user = user;
+    rfb_target = target;
     rfb_host       = host;
     rfb_port       = port;
     rfb_password   = (password !== undefined)   ? password : "";
